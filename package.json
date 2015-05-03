@@ -1,0 +1,22 @@
+{   
+  "name": "notifuse",
+  "description": "NodeJS client to interact with the Notifuse.com API.",
+  "version": "0.1.0",
+  "homepage": "https://github.com/Notifuse/notifuse-node",
+  "author": "Pierre Bazoge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Notifuse/notifuse-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Notifuse/notifuse-node/issues"
+  },
+  "main": "./main",
+  "dependencies": {
+    "request": "2.55.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=0.10.0"
+  }
+}
