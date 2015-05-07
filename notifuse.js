@@ -67,13 +67,11 @@ var createClient = function(apiKey, options){
   */
   client.send = function(callback){
 
-    var result = {};
-
     client.log('info', 'sending '+this.messages.length+' messages');
 
     if(this.messages.length == 0) {
 
-      result = {
+      var result = {
         'code': '200',
         'success': true,
         'queued': [],
@@ -105,6 +103,8 @@ var createClient = function(apiKey, options){
 
       callback(null, result);
     });
+
+    client.messages = [];
   };
 
 
