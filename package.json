@@ -1,9 +1,15 @@
-{   
+{
   "name": "notifuse",
   "description": "NodeJS client to interact with the Notifuse.com API.",
-  "version": "0.1.0",
-  "homepage": "https://github.com/Notifuse/notifuse-node",
+  "version": "1.0.0",
+  "homepage": "https://notifuse.com",
   "author": "Pierre Bazoge",
+  "maintainers": [
+    {
+      "name": "pierre-b",
+      "email": "pierre@notifuse.com"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Notifuse/notifuse-node.git"
@@ -11,12 +17,29 @@
   "bugs": {
     "url": "https://github.com/Notifuse/notifuse-node/issues"
   },
+  "keywords": [
+    "notifuse",
+    "notification",
+    "email",
+    "sms",
+    "push",
+    "slack",
+    "sendgrid",
+    "mailgun",
+    "twilio",
+    "ses",
+    "firebase",
+    "postmark",
+    "twitter"
+  ],
   "main": "./main",
   "dependencies": {
-    "request": "2.55.0"
+    "async": "^2.0.0-rc.6",
+    "hoek": "^4.0.1",
+    "request": "^2.72.0"
   },
   "devDependencies": {},
   "engines": {
-    "node": ">=0.10.0"
+    "node": ">=4.0.0"
   }
 }

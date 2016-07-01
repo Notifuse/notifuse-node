@@ -1,153 +1,191 @@
-var request = require('request');
+'use strict';
 
-var createClient = function(apiKey, options){
+const Request = require('request');
+const Hoek = require('hoek');
+const Https = require('https');
+const Async = require('async');
 
-  if(!apiKey) throw new Error("Your Notifuse API key is required to init the client: `init(apiKey)`");
+const internals = {};
 
-  var client = {
-    apiKey: apiKey,
-    debug: (options.debug === true) ? true : false,
-    host: options.host || 'https://api.notifuse.com/v1',
-    messages: [],
-    logger: options.logger || null
-  };
+// Utils
 
+internals._wrap = function (bind, method, args) {
 
-  /**
-      addMessage(message)
-      ---
-      this function adds a message to next sendMessages() call
+  return new Promise((resolve, reject) => {
 
-      // todo: add URL to the docs about message structure
+    const callback = (error, result) => {
 
-      message:object                  the message object
-  */
-  client.addMessage = function(message){
+      if (error) {
+        return reject(error);
+      }
 
-    if(typeof message !== 'object') {
-      throw new Error("The message should be an object: `addMessage(message)`");
-    }
-
-    client.messages.push(message);
-
-    client.log('info', 'message added', message);
-  };
-
-
-  /**
-      log(level, message, metadata)
-      ---
-      this function logs a message with the provided logger in options.logger
-      with logger.log(level, message, metadata)
-
-      level:string                  the log level
-      message:string                the log message
-      metadata:object               optionnal metadata json object
-  */
-  client.log = function(level, message, metadata){
-
-    if(client.logger) {
-      if(metadata) client.logger.log(level, message, metadata);
-      else client.logger.log(level, message);
-    }
-    else if(client.debug) {
-      if(metadata) console.log(message, metadata);
-      else console.log(message);
-    }
-  };
-
-
-  /**
-      send(callback)
-      ---
-      this function sends messages to the API endpoint
-
-      callback:function(err:Error, result:object)   callback is called when the request is
-                                                    finished or an error occurs
-  */
-  client.send = function(callback){
-
-    client.log('info', 'sending '+this.messages.length+' messages');
-
-    if(this.messages.length == 0) {
-
-      var result = {
-        'code': '200',
-        'success': true,
-        'queued': [],
-        'failed': []
-      };
-
-      callback(null, result);
-    }
-
-    var requestOptions = {
-      method : 'POST',
-      url : client.host+'/messages',
-      headers: {
-        'Authorization': 'Bearer '+client.apiKey
-      },
-      json: {messages: client.messages}
+      return resolve(result);
     };
 
-    client.log('info', 'request', requestOptions);
+    method.apply(bind, args ? args.concat(callback) : [callback]);
+  });
+};
 
-    client.request_(requestOptions, 200, function(err, result){
 
-      if(err) {
-        client.log('error', 'send messages failed');
-        return callback(err);
-      }
+// Client
 
-      client.log('info', 'messages sent', result);
+internals.Client = function(apiKey, options) {
+  if (!options) {
+    options = {};
+  }
 
-      callback(null, result);
-    });
+  Hoek.assert(typeof apiKey === 'string', 'Your project API key is required!');
+  Hoek.assert(typeof options === 'object', 'Options should be an Object!');
 
-    client.messages = [];
+
+  const defaults = {
+    host: 'https://api.notifuse.com/v2/',
+    agent: new Https.Agent({ maxSockets: Infinity }),
+    timeout: 5000, // ms
+    maxAttempts: 5,
+    retryDelay: 250 // ms
   };
 
+  this.apiKey = apiKey;
 
-  /**
-      request_(options, expectedStatusCode, callback)
-      ---
-      this function performs an HTTP request with provided options
-      and returns formatted result
+  this.options = Hoek.applyToDefaults(defaults, options);
 
-      options:object                                request options
-      expectedStatusCode:interger                   expected status code of the response
-      callback:function(err:Error, result:object)   callback is called when the request is
-                                                    finished or an error occurs
-  */
-  client.request_ = function(options, expectedStatusCode, callback) {
+  this.contacts = new internals.Contacts(this._makeAPICall.bind(this));
+};
 
-    request(options, function (err, response, data) {
 
-      if(err) {
-        client.log('error', err);
-        return callback(err);
-      }
+internals.Client.prototype._makeAPICall = function(settings, callback) {
 
-      client.log('info', 'HTTP response', data);
+  let options = {
+    method: settings.method,
+    url: this.options.host+settings.endpoint,
+    headers: {
+      'Authorization': 'Bearer '+this.apiKey,
+      'User-Agent': 'node-client v'+require('./version')
+    },
+    qs: settings.query || {},
+    json: settings.payload || true,
+    timeout: this.options.timeout,
+    agent: this.options.agent
+  };
 
-      if(response.statusCode !== expectedStatusCode) {
+  let strategy = {
+    times: this.options.maxAttempts,
+    retryDelay: this.options.retryDelay
+  };
 
-        client.log('warning', 'request failed, status code: '+response.statusCode+', expected: '+expectedStatusCode, response.body);
+  // console.log('options', options);
+  // console.log('strategy', strategy);
 
-        return callback(null, {
-          code: response.statusCode,
-          success: false,
-          error: response.body
-        });
+  Async.retry(strategy, (done, previousResult) => {
+
+    Request(options, (error, response, body) => {
+
+      if (error) {
+        return done(error);
       }
       
-      callback(null, data);
+      if (response && response.statusCode >= 400) {
+        let message = response.statusCode+' '+body;
+
+        if (body.error) message = body.error;
+        if (body.error && body.message) message += ' - '+body.message;
+
+        return done(new Error(message));
+      }
+
+      done(null, body);
     });
-  };
-
-  return client;
+    
+  }, callback);
 };
 
-module.exports = {
-  init: createClient
+
+// Contacts
+
+internals.Contacts = function(makeAPICall) {
+  this.name = 'contacts';
+  this.makeAPICall = makeAPICall;
 };
+
+// Contacts.upsert
+
+internals.Contacts.prototype.upsert = function(contacts, callback) {
+
+  if (!callback) {
+    return internals._wrap(this, this.upsert, [contacts]);
+  }
+
+  try {
+    Hoek.assert(Array.isArray(contacts), 'contacts must be an Array');
+    Hoek.assert(contacts.length > 0, 'contacts must contain at least one object');
+
+    contacts.forEach((contact, i) => {
+      Hoek.assert(typeof contact === 'object', 'contacts['+i+'] must be an Object');
+    });
+  }
+  catch (e) {
+    return callback(e);
+  }
+
+  return this.makeAPICall({
+    method: 'POST', 
+    endpoint: 'contacts.upsert', 
+    payload: {contacts: contacts}
+  }, callback);
+};
+
+
+// Messages
+
+internals.Messages = function(makeAPICall) {
+  this.name = 'messages';
+  this.makeAPICall = makeAPICall;
+};
+
+internals.Messages.prototype.send = function(messages, callback) {
+
+  if (!callback) {
+    return internals._wrap(this, this.send, [messages]);
+  }
+
+  try {
+    Hoek.assert(Array.isArray(messages), 'messages must be an Array');
+    Hoek.assert(messages.length > 0, 'messages must contain at least one object');
+
+    messages.forEach((contact, i) => {
+      Hoek.assert(typeof contact === 'object', 'messages['+i+'] must be an Object');
+    });
+  }
+  catch (e) {
+    return callback(e);
+  }
+
+  return this.makeAPICall({
+    method: 'POST', 
+    endpoint: 'messages.send', 
+    payload: {messages: messages}
+  }, callback);
+};
+
+internals.Messages.prototype.info = function(message, callback) {
+
+  if (!callback) {
+    return internals._wrap(this, this.info, [message]);
+  }
+
+  try {
+    Hoek.assert(typeof message === 'string', 'message must be a message ID string');
+  }
+  catch (e) {
+    return callback(e);
+  }
+
+  return this.makeAPICall({
+    method: 'GET', 
+    endpoint: 'messages.info', 
+    query: {message: message}
+  }, callback);
+};
+
+module.exports = internals.Client;
