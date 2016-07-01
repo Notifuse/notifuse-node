@@ -1,7 +1,7 @@
 {
   "name": "notifuse",
   "description": "NodeJS client to interact with the Notifuse.com API.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "homepage": "https://notifuse.com",
   "author": "Pierre Bazoge",
   "maintainers": [

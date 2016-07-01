@@ -51,6 +51,7 @@ internals.Client = function(apiKey, options) {
   this.options = Hoek.applyToDefaults(defaults, options);
 
   this.contacts = new internals.Contacts(this._makeAPICall.bind(this));
+  this.messages = new internals.Messages(this._makeAPICall.bind(this));
 };
 
 
@@ -96,7 +97,7 @@ internals.Client.prototype._makeAPICall = function(settings, callback) {
 
       done(null, body);
     });
-    
+
   }, callback);
 };
 
