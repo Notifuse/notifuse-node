@@ -1,1 +1,3 @@
-module.exports = '1.1.0';
+'use strict';
+
+module.exports = '1.1.1';

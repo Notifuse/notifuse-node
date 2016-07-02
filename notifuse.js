@@ -11,182 +11,198 @@ const internals = {};
 
 internals._wrap = function (bind, method, args) {
 
-  return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
 
-    const callback = (error, result) => {
+        const callback = (error, result) => {
 
-      if (error) {
-        return reject(error);
-      }
+            if (error) {
+                return reject(error);
+            }
 
-      return resolve(result);
-    };
+            return resolve(result);
+        };
 
-    method.apply(bind, args ? args.concat(callback) : [callback]);
-  });
+        method.apply(bind, args ? args.concat(callback) : [callback]);
+    });
 };
 
 
 // Client
 
-internals.Client = function(apiKey, options) {
-  if (!options) {
-    options = {};
-  }
+internals.Client = function (apiKey, options) {
 
-  Hoek.assert(typeof apiKey === 'string', 'Your project API key is required!');
-  Hoek.assert(typeof options === 'object', 'Options should be an Object!');
+    if (!options) {
+        options = {};
+    }
+
+    Hoek.assert(typeof apiKey === 'string', 'Your project API key is required!');
+    Hoek.assert(typeof options === 'object', 'Options should be an Object!');
 
 
-  const defaults = {
-    host: 'https://api.notifuse.com/v2/',
-    agent: new Https.Agent({ maxSockets: Infinity }),
-    timeout: 5000, // ms
-    maxAttempts: 5,
-    retryDelay: 250 // ms
-  };
+    const defaults = {
+        host: 'https://api.notifuse.com/v2/',
+        agent: new Https.Agent({ maxSockets: Infinity }),
+        timeout: 5000, // ms
+        maxAttempts: 5,
+        retryDelay: 250 // ms
+    };
 
-  this.apiKey = apiKey;
+    this.apiKey = apiKey;
 
-  this.options = Hoek.applyToDefaults(defaults, options);
+    this.options = Hoek.applyToDefaults(defaults, options);
 
-  this.contacts = new internals.Contacts(this._makeAPICall.bind(this));
-  this.messages = new internals.Messages(this._makeAPICall.bind(this));
+    this.contacts = new internals.Contacts(this._makeAPICall.bind(this));
+    this.messages = new internals.Messages(this._makeAPICall.bind(this));
 };
 
 
-internals.Client.prototype._makeAPICall = function(settings, callback) {
+internals.Client.prototype._makeAPICall = function (settings, callback) {
 
-  let options = {
-    method: settings.method,
-    url: this.options.host+settings.endpoint,
-    headers: {
-      'Authorization': 'Bearer '+this.apiKey,
-      'User-Agent': 'node-client v'+require('./version')
-    },
-    qs: settings.query || {},
-    json: settings.payload || true,
-    timeout: this.options.timeout,
-    agent: this.options.agent
-  };
+    const options = {
+        method: settings.method,
+        url: this.options.host + settings.endpoint,
+        headers: {
+            'Authorization': 'Bearer ' + this.apiKey,
+            'User-Agent': 'node-client v' + require('./version')
+        },
+        qs: settings.query || {},
+        json: settings.payload || true,
+        timeout: this.options.timeout,
+        agent: this.options.agent
+    };
 
-  let strategy = {
-    times: this.options.maxAttempts,
-    retryDelay: this.options.retryDelay
-  };
+    const strategy = {
+        times: this.options.maxAttempts,
+        retryDelay: this.options.retryDelay
+    };
 
-  // console.log('options', options);
-  // console.log('strategy', strategy);
+    // console.log('options', options);
+    // console.log('strategy', strategy);
 
-  Async.retry(strategy, (done, previousResult) => {
+    Async.retry(strategy, (done, previousResult) => {
 
-    Request(options, (error, response, body) => {
+        Request(options, (error, response, body) => {
 
-      if (error) {
-        return done(error);
-      }
-      
-      if (response && response.statusCode >= 400) {
-        let message = response.statusCode+' '+body;
+            if (error) {
+                return done(error);
+            }
 
-        if (body.error) message = body.error;
-        if (body.error && body.message) message += ' - '+body.message;
+            if (response && response.statusCode >= 400) {
+                let message = response.statusCode + ' ' + body;
 
-        return done(new Error(message));
-      }
+                if (body.error) {
+                    message = body.error;
+                }
 
-      done(null, body);
-    });
+                if (body.error && body.message) {
+                    message += ' - ' + body.message;
+                }
 
-  }, callback);
+                return done(new Error(message));
+            }
+
+            done(null, body);
+        });
+
+    }, callback);
 };
 
 
 // Contacts
 
-internals.Contacts = function(makeAPICall) {
-  this.name = 'contacts';
-  this.makeAPICall = makeAPICall;
+internals.Contacts = function (makeAPICall) {
+
+    this.name = 'contacts';
+    this.makeAPICall = makeAPICall;
 };
 
 // Contacts.upsert
 
-internals.Contacts.prototype.upsert = function(contacts, callback) {
+internals.Contacts.prototype.upsert = function (contacts, callback) {
 
-  if (!callback) {
-    return internals._wrap(this, this.upsert, [contacts]);
-  }
+    Hoek.assert(callback === undefined || typeof callback === 'function', 'the second parameter must be a `callback(err, result)` function');
 
-  try {
-    Hoek.assert(Array.isArray(contacts), 'contacts must be an Array');
-    Hoek.assert(contacts.length > 0, 'contacts must contain at least one object');
+    if (!callback) {
+        return internals._wrap(this, this.upsert, [contacts]);
+    }
 
-    contacts.forEach((contact, i) => {
-      Hoek.assert(typeof contact === 'object', 'contacts['+i+'] must be an Object');
-    });
-  }
-  catch (e) {
-    return callback(e);
-  }
+    try {
+        Hoek.assert(Array.isArray(contacts), 'the first parameter (contacts) must be an Array');
+        Hoek.assert(contacts.length > 0, 'the first parameter (contacts) must contain at least one object');
 
-  return this.makeAPICall({
-    method: 'POST', 
-    endpoint: 'contacts.upsert', 
-    payload: {contacts: contacts}
-  }, callback);
+        contacts.forEach((contact, i) => {
+
+            Hoek.assert(typeof contact === 'object', 'contacts[' + i + '] must be an Object');
+        });
+    }
+    catch (e) {
+        return callback(e);
+    }
+
+    return this.makeAPICall({
+        method: 'POST',
+        endpoint: 'contacts.upsert',
+        payload: { contacts: contacts }
+    }, callback);
 };
 
 
 // Messages
 
-internals.Messages = function(makeAPICall) {
-  this.name = 'messages';
-  this.makeAPICall = makeAPICall;
+internals.Messages = function (makeAPICall) {
+
+    this.name = 'messages';
+    this.makeAPICall = makeAPICall;
 };
 
-internals.Messages.prototype.send = function(messages, callback) {
+internals.Messages.prototype.send = function (messages, callback) {
 
-  if (!callback) {
-    return internals._wrap(this, this.send, [messages]);
-  }
+    Hoek.assert(callback === undefined || typeof callback === 'function', 'the second parameter must be a `callback(err, result)` function');
 
-  try {
-    Hoek.assert(Array.isArray(messages), 'messages must be an Array');
-    Hoek.assert(messages.length > 0, 'messages must contain at least one object');
+    if (!callback) {
+        return internals._wrap(this, this.send, [messages]);
+    }
 
-    messages.forEach((contact, i) => {
-      Hoek.assert(typeof contact === 'object', 'messages['+i+'] must be an Object');
-    });
-  }
-  catch (e) {
-    return callback(e);
-  }
+    try {
+        Hoek.assert(Array.isArray(messages), 'the first parameter (messages) must be an Array');
+        Hoek.assert(messages.length > 0, 'the first parameter (messages) must contain at least one object');
 
-  return this.makeAPICall({
-    method: 'POST', 
-    endpoint: 'messages.send', 
-    payload: {messages: messages}
-  }, callback);
+        messages.forEach((contact, i) => {
+
+            Hoek.assert(typeof contact === 'object', 'messages[' + i + '] must be an Object');
+        });
+    }
+    catch (e) {
+        return callback(e);
+    }
+
+    return this.makeAPICall({
+        method: 'POST',
+        endpoint: 'messages.send',
+        payload: { messages: messages }
+    }, callback);
 };
 
-internals.Messages.prototype.info = function(message, callback) {
+internals.Messages.prototype.info = function (message, callback) {
 
-  if (!callback) {
-    return internals._wrap(this, this.info, [message]);
-  }
+    Hoek.assert(callback === undefined || typeof callback === 'function', 'the second parameter must be a `callback(err, result)` function');
 
-  try {
-    Hoek.assert(typeof message === 'string', 'message must be a message ID string');
-  }
-  catch (e) {
-    return callback(e);
-  }
+    if (!callback) {
+        return internals._wrap(this, this.info, [message]);
+    }
 
-  return this.makeAPICall({
-    method: 'GET', 
-    endpoint: 'messages.info', 
-    query: {message: message}
-  }, callback);
+    try {
+        Hoek.assert(typeof message === 'string', 'the first parameter must be a message ID string');
+    }
+    catch (e) {
+        return callback(e);
+    }
+
+    return this.makeAPICall({
+        method: 'GET',
+        endpoint: 'messages.info',
+        query: { message: message }
+    }, callback);
 };
 
 module.exports = internals.Client;
