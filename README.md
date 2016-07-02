@@ -134,7 +134,7 @@ client.messages.info(myMessageId, function(error, result){
 
 // same with a promise
 
-client.messages.send([myMessage]).then(function(result){
+client.messages.info([myMessage]).then(function(result){
 
 })
 .catch(function(error){
