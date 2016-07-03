@@ -36,7 +36,7 @@
     "postmark",
     "twitter"
   ],
-  "main": "./main",
+  "main": "./lib/notifuse.js",
   "dependencies": {
     "async": "^2.0.0-rc.6",
     "hoek": "^4.0.1",
@@ -44,7 +44,8 @@
   },
   "devDependencies": {
     "code": "^3.0.1",
-    "lab": "^10.8.2"
+    "lab": "^10.8.2",
+    "nock": "^8.0.0"
   },
   "engines": {
     "node": ">=4.0.0"

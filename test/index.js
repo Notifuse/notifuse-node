@@ -1,9 +1,9 @@
 'use strict';
 
-const Notifuse = require('../notifuse');
 const Code = require('code');
 const Lab = require('lab');
 const Https = require('https');
+const Nock = require('nock');
 
 // Test shortcuts
 
@@ -12,8 +12,31 @@ const describe = lab.experiment;
 const it = lab.test;
 const expect = Code.expect;
 
-const TEST_HOST = process.env.MOCK_HOST || 'https://localapi.notifuse.com';
-const API_KEY = process.env.API_KEY || require('./api_key');
+const Notifuse = require('../lib/notifuse');
+const Utils = require('../lib/utils');
+
+const HOST = 'https://localapi.notifuse.com';
+const BASE_URI = HOST + '/v2/';
+const API_KEY = 'xxxxxxxx';
+
+
+describe('Utils', () => {
+
+    it('promisify returns a promise if no callback', (done) => {
+
+        const functionWithoutCallback = function (params){ };
+
+        const promise = Utils.promisify(this, functionWithoutCallback, 123);
+
+        expect(promise).to.be.an.object();
+        expect(promise.then).to.be.a.function();
+        expect(promise.catch).to.be.a.function();
+
+        done();
+    });
+});
+
+
 
 describe('Client', () => {
 
@@ -42,7 +65,7 @@ describe('Client', () => {
         expect(client.apiKey).to.be.a.string();
 
         expect(client.options).to.be.an.object();
-        expect(client.options.host).to.be.a.string();
+        expect(client.options.baseUri).to.be.a.string();
         expect(client.options.agent).to.be.an.object();
         expect(client.options.agent.constructor.name).equal('Agent');
         expect(client.options.timeout).to.be.a.number();
@@ -73,7 +96,7 @@ describe('Client', () => {
         };
 
         const newOptions = {
-            host: 'new_host',
+            baseUri: 'new_baseUri',
             agent: new Https.Agent(agentOptions),
             timeout: 1337,
             maxAttempts: 1337,
@@ -83,7 +106,7 @@ describe('Client', () => {
         const client = new Notifuse(API_KEY, newOptions);
 
         expect(client.options).to.be.an.object();
-        expect(client.options.host).to.equal(newOptions.host);
+        expect(client.options.baseUri).to.equal(newOptions.baseUri);
         expect(client.options.agent).to.be.an.object();
         expect(client.options.agent.constructor.name).equal('Agent');
         expect(client.options.agent.options.maxSockets).to.equal(agentOptions.maxSockets);
@@ -96,126 +119,79 @@ describe('Client', () => {
     });
 });
 
+describe('API call', () => {
 
-describe('Contacts upsert', () => {
+    it('returns an error after request timeout', (done) => {
 
-    it('returns a promise if no callback', (done) => {
+        Nock.cleanAll();
 
-        const client = new Notifuse(API_KEY);
-
-        const promise = client.contacts.upsert([]);
-
-        expect(promise).to.be.an.object();
-        expect(promise.then).to.be.a.function();
-        expect(promise.catch).to.be.a.function();
-
-        done();
-    });
-
-    it('returns an error if the contacts is not an array', (done) => {
-
-        const client = new Notifuse(API_KEY);
-
-        client.contacts.upsert('no_array').catch((error) => {
-
-            expect(error).to.be.an.error('the first parameter (contacts) must be an Array');
+        const client = new Notifuse(API_KEY, {
+            baseUri: BASE_URI,
+            maxAttempts: 1,
+            retryDelay: 0,
+            timeout: 200
         });
+        const messageId = 'message_id_timeout';
 
-        done();
-    });
+        Nock(HOST, { reqheaders: { 'authorization': 'Bearer ' + API_KEY } })
+            .get('/v2/messages.info')
+            .query({ message: messageId })
+            .socketDelay(400)
+            .reply(200, {
+                statusCode: 200
+            });
 
-    it('returns an error if the contact is not an object', (done) => {
+        client.messages.info(messageId).then((result) => {
 
-        const client = new Notifuse(API_KEY);
-
-        client.contacts.upsert(['no_object']).catch((error) => {
-
-            expect(error).to.be.an.error('the first parameter (contacts) must contain at least one object');
-        });
-
-        done();
-    });
-
-    it('returns an error if the callback is not a function', (done) => {
-
-        const client = new Notifuse(API_KEY);
-
-        expect(() => {
-
-            client.contacts.upsert([{}], 'no_function');
-        }).to.throw('the second parameter must be a `callback(err, result)` function');
-
-        done();
-    });
-
-    it('upserts a valid contact', (done) => {
-
-        const client = new Notifuse(API_KEY, { host: TEST_HOST });
-        const contact = {
-            id: '123',
-            profile: {
-                $set: {
-                    firstName: 'John',
-                    lastName: 'Doe'
-                }
-            }
-        };
-
-        client.contacts.upsert([contact]).then((result) => {
-
-            expect(result).to.be.an.object();
-            expect(result.statusCode).to.equal(200);
-            expect(result.success).to.be.true();
-            expect(result.inserted).to.be.an.array();
-            expect(result.updated).to.be.an.array();
-            expect(result.failed).to.be.an.array().to.have.length(0);
+            done('socket timeout not working');
         })
         .catch((error) => {
 
-            Code.fail(error);
+            expect(error).to.be.an.error();
+            expect(error.code).to.equal('ESOCKETTIMEDOUT');
+            done();
         });
-
-        done();
     });
 
-    it('fails to upsert a non valid contact', (done) => {
+    it('returns an error for >= 400 statusCode', (done) => {
 
-        const client = new Notifuse(API_KEY, { host: TEST_HOST });
-        const contactWithoutId = {
-            profile: {
-                $set: {
-                    firstName: 'John',
-                    lastName: 'Doe'
-                }
-            }
-        };
+        Nock.cleanAll();
 
-        client.contacts.upsert([contactWithoutId]).then((result) => {
+        const client = new Notifuse(API_KEY, {
+            baseUri: BASE_URI,
+            maxAttempts: 1,
+            retryDelay: 0
+        });
+        const messageId = 'message_id_api_error';
 
-            expect(result).to.be.an.object();
-            expect(result.statusCode).to.equal(200);
-            expect(result.success).to.be.false();
-            expect(result.inserted).to.be.an.array().to.have.length(0);
-            expect(result.updated).to.be.an.array().to.have.length(0);
-            expect(result.failed).to.be.an.array().to.have.length(1);
+        Nock(HOST, { reqheaders: { 'authorization': 'Bearer ' + API_KEY } })
+            .get('/v2/messages.info')
+            .query({ message: messageId })
+            .reply(400, {
+                statusCode: 400,
+                error: 'Bad Request',
+                message: 'message is required'
+            });
+
+        client.messages.info(messageId).then((result) => {
+
+            done('API errors in responses not caught');
         })
         .catch((error) => {
 
-            Code.fail(error);
+            expect(error).to.be.an.error('Bad Request - message is required');
+            done();
         });
-
-        done();
     });
 });
 
+describe('contacts.upsert', () => {
 
-describe('Messages send', () => {
+    this.notifuseClient = new Notifuse(API_KEY, { baseUri: BASE_URI });
 
     it('returns a promise if no callback', (done) => {
 
-        const client = new Notifuse(API_KEY);
-
-        const promise = client.messages.send([]);
+        const promise = this.notifuseClient.contacts.upsert([{}]);
 
         expect(promise).to.be.an.object();
         expect(promise.then).to.be.a.function();
@@ -226,35 +202,47 @@ describe('Messages send', () => {
 
     it('returns an error if the contacts is not an array', (done) => {
 
-        const client = new Notifuse(API_KEY);
+        const self = this;
 
-        client.messages.send('no_array').catch((error) => {
+        expect(() => {
 
-            expect(error).to.be.an.error('the first parameter (messages) must be an Array');
-        });
+            self.notifuseClient.contacts.upsert('no_array');
+        }).to.throw('the first parameter must be an Array of contacts');
+
+        done();
+    });
+
+    it('returns an error if the contacts Array is empty', (done) => {
+
+        const self = this;
+
+        expect(() => {
+
+            self.notifuseClient.contacts.upsert([]);
+        }).to.throw('the first parameter (Array) must contain at least one object (contact)');
 
         done();
     });
 
     it('returns an error if the contact is not an object', (done) => {
 
-        const client = new Notifuse(API_KEY);
+        const self = this;
 
-        client.messages.send(['no_object']).catch((error) => {
+        expect(() => {
 
-            expect(error).to.be.an.error('the first parameter (messages) must contain at least one object');
-        });
+            self.notifuseClient.contacts.upsert(['no_object']);
+        }).to.throw('the contact Array[0] must be an Object');
 
         done();
     });
 
     it('returns an error if the callback is not a function', (done) => {
 
-        const client = new Notifuse(API_KEY);
+        const self = this;
 
         expect(() => {
 
-            client.messages.send([{}], 'no_function');
+            self.notifuseClient.contacts.upsert([{}], 'no_function');
         }).to.throw('the second parameter must be a `callback(err, result)` function');
 
         done();
@@ -262,8 +250,112 @@ describe('Messages send', () => {
 
     it('makes a hit to the API', (done) => {
 
-        const client = new Notifuse(API_KEY, { host: TEST_HOST });
-        const message = {
+        Nock.cleanAll();
+
+        const payload = [{
+            id: '123',
+            profile: {
+                $set: {
+                    firstName: 'John',
+                    lastName: 'Doe'
+                }
+            }
+        }];
+
+        Nock(HOST, { reqheaders: { 'authorization': 'Bearer ' + API_KEY } })
+            .post('/v2/contacts.upsert', {
+                contacts: payload
+            })
+            .reply(200, {
+                statusCode: 200,
+                success: true,
+                inserted: [],
+                updated: ['123'],
+                failed: []
+            });
+
+        this.notifuseClient.contacts.upsert(payload).then((result) => {
+
+            expect(result).to.be.an.object();
+            expect(result.statusCode).to.equal(200);
+            done();
+        })
+        .catch((error) => {
+
+            done(error);
+        });
+    });
+});
+
+
+describe('messages.send', () => {
+
+    this.notifuseClient = new Notifuse(API_KEY, { baseUri: BASE_URI });
+
+    it('returns a promise if no callback', (done) => {
+
+        const promise = this.notifuseClient.messages.send([{}]);
+
+        expect(promise).to.be.an.object();
+        expect(promise.then).to.be.a.function();
+        expect(promise.catch).to.be.a.function();
+
+        done();
+    });
+
+    it('returns an error if the first parameter is not an array', (done) => {
+
+        const self = this;
+
+        expect(() => {
+
+            self.notifuseClient.messages.send('no_array');
+        }).to.throw('the first parameter (messages) must be an Array');
+
+        done();
+    });
+
+    it('returns an error if the messages Array is empty', (done) => {
+
+        const self = this;
+
+        expect(() => {
+
+            self.notifuseClient.messages.send([]);
+        }).to.throw('the first parameter (messages) must contain at least one object');
+
+        done();
+    });
+
+    it('returns an error if a message is not an object', (done) => {
+
+        const self = this;
+
+        expect(() => {
+
+            self.notifuseClient.messages.send(['no_object']);
+        }).to.throw('messages Array[0] must be an Object');
+
+        done();
+    });
+
+    it('returns an error if the callback is not a function', (done) => {
+
+        const self = this;
+
+        expect(() => {
+
+            self.notifuseClient.messages.send([{}], 'no_function');
+        }).to.throw('the second parameter must be a `callback(err, result)` function');
+
+        done();
+    });
+
+    it('makes a hit to the API', (done) => {
+
+        Nock.cleanAll();
+
+        const payload = [{
             notification: 'welcome',
             channel: 'postmark-notifuse',
             template: 'en',
@@ -273,19 +365,29 @@ describe('Messages send', () => {
                     email: 'john@yopmail.com'
                 }
             }
-        };
+        }];
 
-        client.messages.send([message]).then((result) => {
+        Nock(HOST, { reqheaders: { 'authorization': 'Bearer ' + API_KEY } })
+            .post('/v2/messages.send', {
+                messages: payload
+            })
+            .reply(200, {
+                statusCode: 200,
+                success: true,
+                queued: [{}],
+                failed: []
+            });
+
+        this.notifuseClient.messages.send(payload).then((result) => {
 
             expect(result).to.be.an.object();
-            expect(result.statusCode).to.be.a.number();
+            expect(result.statusCode).to.equal(200);
+            done();
         })
         .catch((error) => {
 
-            Code.fail(error);
+            done(error);
         });
-
-        done();
     });
 });
 
@@ -293,11 +395,11 @@ describe('Messages send', () => {
 
 describe('Messages info', () => {
 
+    this.notifuseClient = new Notifuse(API_KEY, { baseUri: BASE_URI });
+
     it('returns a promise if no callback', (done) => {
 
-        const client = new Notifuse(API_KEY);
-
-        const promise = client.messages.info('message_id');
+        const promise = this.notifuseClient.messages.info('message_id');
 
         expect(promise).to.be.an.object();
         expect(promise.then).to.be.a.function();
@@ -308,30 +410,40 @@ describe('Messages info', () => {
 
     it('returns an error if the message is not a string', (done) => {
 
-        const client = new Notifuse(API_KEY);
+        const self = this;
 
-        client.messages.info(false).catch((error) => {
+        expect(() => {
 
-            expect(error).to.be.an.error('the first parameter must be a message ID string');
-        });
+            self.notifuseClient.messages.info(false);
+        }).to.throw('the first parameter must be a message ID string');
 
         done();
     });
 
     it('makes a hit to the API', (done) => {
 
-        const client = new Notifuse(API_KEY, { host: TEST_HOST });
+        Nock.cleanAll();
 
-        client.messages.info('message_id').then((result) => {
+        const messageId = 'message_id';
+
+        Nock(HOST, { reqheaders: { 'authorization': 'Bearer ' + API_KEY } })
+            .persist()
+            .get('/v2/messages.info')
+            .query({ message: messageId })
+            .reply(200, {
+                statusCode: 200,
+                message: {}
+            });
+
+        this.notifuseClient.messages.info(messageId).then((result) => {
 
             expect(result).to.be.an.object();
-            expect(result.statusCode).to.be.a.number();
+            expect(result.statusCode).to.equal(200);
+            done();
         })
         .catch((error) => {
 
-            Code.fail(error);
+            done(error);
         });
-
-        done();
     });
 });
